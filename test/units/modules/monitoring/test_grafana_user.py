@@ -123,3 +123,47 @@ class GrafanaUserTest(unittest.TestCase):
             headers={'Content-Type': 'application/json', 'Authorization': self.authorization},
             method='DELETE')
         self.assertEquals(result, {"message": "User deleted"})
+
+
+    def test_get_user_id_from_mail(self):
+        # FIXME: What's needed for module initialization?
+        set_module_args('url': 'http://grafana.example.com')
+        module = grafana_user.setup_module_object()
+        grafana_iface = grafana_user.GrafanaUserInteface(module)
+        tests = (
+            ('johndoe@example.com', 1),
+            ('johndoe@example.com', 1234),
+            ('johndoe@example.com', None),
+        )
+        for email, expected_id in tests:
+            grafana_iface._sendrequest = MagicMock(return_value=expected_id)
+            if expected_id is None:
+                with self.assertRaises(AnsibleFailJson) as result:
+                    grafana_iface.get_user_id_from_mail(email)
+                self.assertTrue(result.exception.args[0]['msg'].startswith("User '{0}' does not exists".format(email))
+                self.assertTrue(result.exception.args[0]['failed'])
+            else:
+                res = grafana_iface.get_user_id_from_mail(email)
+                grafana_iface._send_request.assert_called_once_with(
+                    module,
+                    '/api/users/lookup?loginOrEmail={0}'.format(email),
+                    data=None,
+                    headers={'Content-Type': 'application/json', 'Authorization': self.authorization},
+                    method='GET')
+                self.assertEquals(res, expected_id)
+
+    @patch('ansible.modules.monitoring.grafana_user.fetch_url')
+    def test__send_request(self, mock_fetch_url):
+        set_module_args({
+            'url': 'http://grafana.example.com',
+            'url_username': 'jdoe',
+            'url_password': 'passwd'
+        })
+        module = grafana_user.setup_module_object()
+        grafana_iface = grafana_user.GrafanaUserInterface(module)
+        tests = (
+            ({url: 'rst', data: 'rst', headers: 'rst', method: 'rst'}, user_exists_resp, True),
+        )
+        for args, resp_func, shouldFail in tests:
+            mock_fetch_url.return_value = resp_func()
+            res = grafana_iface._send_request(**args)
