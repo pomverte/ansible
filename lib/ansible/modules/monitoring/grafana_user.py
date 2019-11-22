@@ -30,7 +30,7 @@ DOCUMENTATION = """
 
 EXAMPLES = """
 ---
-- name: Create a user
+- name: Create a Grafana user
   grafana_user:
     url: "https://grafana.example.com"
     url_username: admin
@@ -41,7 +41,7 @@ EXAMPLES = """
     password: robin
     state: present
 
-- name: Delete a user
+- name: Delete a Grafana user
   grafana_user:
     url: "https://grafana.example.com"
     url_username: admin

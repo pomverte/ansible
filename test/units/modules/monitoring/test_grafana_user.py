@@ -19,6 +19,8 @@
 
 # source hacking/env-setup
 # ansible-test units grafana_user --docker
+# OR
+# docker container run -d -p 3000:3000 --rm grafana/grafana
 
 from __future__ import (absolute_import, division, print_function)
 
@@ -85,6 +87,11 @@ def user_created_resp():
     return (MockedReponse(server_response), {"status": 200})
 
 
+def user_already_exists_resp():
+    server_response = json.dumps({"message": "failed to create user"})
+    return (MockedReponse(server_response), {"status": 500})
+
+
 def user_exists_resp():
     server_response = json.dumps({
         "id": 1,
@@ -113,6 +120,35 @@ class GrafanaUserTest(unittest.TestCase):
 
         self.mock_module_helper.start()
         self.addCleanup(self.mock_module_helper.stop)
+
+    # create a already existing user
+    @patch('ansible.modules.monitoring.grafana_user.fetch_url')
+    def test_create_user_existing_user(self, mock_fetch_url):
+        set_module_args({
+            'url': 'https://grafana.example.com',
+            'url_username': 'admin',
+            'url_password': 'changeme',
+            'name': 'Joker',
+            'email': 'joker@gotham.com',
+            'login': 'joker',
+            'password': 'oups',
+            'state': 'present'
+        })
+        module = grafana_user.setup_module_object()
+        mock_fetch_url.return_value = user_already_exists_resp()
+
+        grafana_iface = grafana_user.GrafanaUserInterface(module)
+        with self.assertRaises(AnsibleFailJson):
+            grafana_iface.create_user(
+                'Joker', 'joker@gotham.com', 'joker', 'oups')
+            mock_fetch_url.assert_called_once_with(
+                module,
+                'https://grafana.example.com/api/admin/users',
+                data=json.dumps({'name': 'Joker', 'email': 'joker@gotham.com',
+                                 'login': 'joker', 'password': 'oups'}, sort_keys=True),
+                headers={'Content-Type': 'application/json',
+                         'Authorization': self.authorization},
+                method='POST')
 
     # create a new user
     @patch('ansible.modules.monitoring.grafana_user.fetch_url')
