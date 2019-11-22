@@ -32,12 +32,14 @@ import json
 
 __metaclass__ = type
 
+
 class MockedReponse(object):
     def __init__(self, data):
         self.data = data
 
     def read(self):
         return self.data
+
 
 def exit_json(*args, **kwargs):
     """function to patch over exit_json; package return data into an exception"""
@@ -50,6 +52,8 @@ def fail_json(*args, **kwargs):
     """function to patch over fail_json; package return data into an exception"""
     kwargs['failed'] = True
     raise AnsibleFailJson(kwargs)
+
+
 class AnsibleExitJson(Exception):
     """Exception class to be raised by module.exit_json and caught by the test case"""
     pass
@@ -65,13 +69,21 @@ def set_module_args(args):
     args = json.dumps({'ANSIBLE_MODULE_ARGS': args})
     basic._ANSIBLE_ARGS = to_bytes(args)
 
+
 def user_not_found_resp():
     server_response = json.dumps({"message": "User not found"})
     return (MockedReponse(server_response), {"status": 404})
 
+
 def user_deleted_resp():
     server_response = json.dumps({"message": "User deleted"})
     return (MockedReponse(server_response), {"status": 200})
+
+
+def user_created_resp():
+    server_response = json.dumps({"id": 5, "message": "User created"})
+    return (MockedReponse(server_response), {"status": 200})
+
 
 def user_exists_resp():
     server_response = json.dumps({
@@ -90,6 +102,7 @@ def user_exists_resp():
     }, sort_keys=True)
     return (MockedReponse(server_response), {"status": 200})
 
+
 class GrafanaUserTest(unittest.TestCase):
 
     def setUp(self):
@@ -101,8 +114,37 @@ class GrafanaUserTest(unittest.TestCase):
         self.mock_module_helper.start()
         self.addCleanup(self.mock_module_helper.stop)
 
+    # create a new user
     @patch('ansible.modules.monitoring.grafana_user.fetch_url')
-    def test_delete_user_by_user_id(self, mock_fetch_url):
+    def test_create_user_new_user(self, mock_fetch_url):
+        set_module_args({
+            'url': 'https://grafana.example.com',
+            'url_username': 'admin',
+            'url_password': 'changeme',
+            'name': 'Robin',
+            'email': 'robin@gotham.com',
+            'login': 'robin',
+            'password': 'oups',
+            'state': 'present'
+        })
+        module = grafana_user.setup_module_object()
+        mock_fetch_url.return_value = user_created_resp()
+
+        grafana_iface = grafana_user.GrafanaUserInterface(module)
+        result = grafana_iface.create_user(
+            'Robin', 'robin@gotham.com', 'robin', 'oups')
+        mock_fetch_url.assert_called_once_with(
+            module,
+            'https://grafana.example.com/api/admin/users',
+            data=json.dumps({'name': 'Robin', 'email': 'robin@gotham.com',
+                             'login': 'robin', 'password': 'oups'}, sort_keys=True),
+            headers={'Content-Type': 'application/json',
+                     'Authorization': self.authorization},
+            method='POST')
+        self.assertEquals(result, {"id": 5, "message": "User created"})
+
+    @patch('ansible.modules.monitoring.grafana_user.fetch_url')
+    def test_delete_user(self, mock_fetch_url):
         set_module_args({
             'url': 'https://grafana.example.com',
             'url_username': 'admin',
@@ -120,6 +162,7 @@ class GrafanaUserTest(unittest.TestCase):
             module,
             'https://grafana.example.com/api/admin/users/42',
             data=None,
-            headers={'Content-Type': 'application/json', 'Authorization': self.authorization},
+            headers={'Content-Type': 'application/json',
+                     'Authorization': self.authorization},
             method='DELETE')
         self.assertEquals(result, {"message": "User deleted"})
