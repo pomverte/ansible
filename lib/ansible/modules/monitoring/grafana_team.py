@@ -20,12 +20,12 @@
 from __future__ import absolute_import, division, print_function
 
 ANSIBLE_METADATA = {
-    'status': ['preview'],
-    'supported_by': 'community',
-    'metadata_version': '1.1'
+    "status": ["preview"],
+    "supported_by": "community",
+    "metadata_version": "1.1",
 }
 
-DOCUMENTATION = '''
+DOCUMENTATION = """
 ---
 module: grafana_team
 author:
@@ -95,7 +95,7 @@ options:
   client_cert:
     description:
       - PEM formatted certificate chain file to be used for SSL client authentication.
-      - This file can also include the key as well, and if the key is included, I(client_key) is not required
+      - This file can also include the key, in which case I(client_key) is not required
     type: path
   client_key:
     description:
@@ -105,13 +105,13 @@ options:
   validate_certs:
     description:
       - If C(no), SSL certificates will not be validated.
-      - This should only set to C(no) used on personally controlled sites using self-signed certificates.
+      - This should only be set to C(no) when used on personally controlled sites using self-signed certificates.
       - Prior to 1.9.2 the code defaulted to C(no).
     type: bool
     default: yes
-'''
+"""
 
-EXAMPLES = '''
+EXAMPLES = """
 ---
 - name: Create a team
   grafana_team:
@@ -151,9 +151,9 @@ EXAMPLES = '''
       name: "grafana_working_group"
       email: "foo.bar@example.com"
       state: absent
-'''
+"""
 
-RETURN = '''
+RETURN = """
 ---
 team:
     description: Information about the Team
@@ -202,180 +202,41 @@ team:
             type: int
             sample:
                 - 1
-'''
-
-import json
+"""
 
 from ansible.module_utils.basic import AnsibleModule
 from ansible.module_utils.urls import fetch_url, url_argument_spec, basic_auth_header
+from ansible.module_utils.grafana import GrafanaTeamAdapter
 
 __metaclass__ = type
 
 
-class GrafanaTeamInterface(object):
-
-    def __init__(self, module):
-        self._module = module
-        # {{{ Authentication header
-        self.headers = {"Content-Type": "application/json"}
-        if module.params.get('grafana_api_key', None):
-            self.headers["Authorization"] = "Bearer %s" % module.params['grafana_api_key']
-        else:
-            self.headers["Authorization"] = basic_auth_header(module.params['url_username'], module.params['url_password'])
-        # }}}
-        self.grafana_url = module.params.get("url")
-        grafana_version = self.get_version()
-        if grafana_version["major"] < 5:
-            self._module.fail_json(failed=True, msg="Teams API is available starting Grafana v5")
-
-    def _send_request(self, url, data=None, headers=None, method="GET"):
-        if data is not None:
-            data = json.dumps(data, sort_keys=True)
-        if not headers:
-            headers = []
-
-        full_url = "{grafana_url}{path}".format(grafana_url=self.grafana_url, path=url)
-        resp, info = fetch_url(self._module, full_url, data=data, headers=headers, method=method)
-        status_code = info["status"]
-        if status_code == 404:
-            return None
-        elif status_code == 401:
-            self._module.fail_json(failed=True, msg="Unauthorized to perform action '%s' on '%s' header: %s" % (method, full_url, self.headers))
-        elif status_code == 403:
-            self._module.fail_json(failed=True, msg="Permission Denied")
-        elif status_code == 409:
-            self._module.fail_json(failed=True, msg="Team name is taken")
-        elif status_code == 200:
-            return self._module.from_json(resp.read())
-        self._module.fail_json(failed=True, msg="Grafana Teams API answered with HTTP %d" % status_code)
-
-    def get_version(self):
-        url = "/api/health"
-        response = self._send_request(url, data=None, headers=self.headers, method="GET")
-        version = response.get("version")
-        major, minor, rev = version.split(".")
-        return {"major": int(major), "minor": int(minor), "rev": int(rev)}
-
-    def create_team(self, name, email):
-        url = "/api/teams"
-        team = dict(email=email, name=name)
-        response = self._send_request(url, data=team, headers=self.headers, method="POST")
-        return response
-
-    def get_team(self, name):
-        url = "/api/teams/search?name={team}".format(team=name)
-        response = self._send_request(url, headers=self.headers, method="GET")
-        if not response.get("totalCount") <= 1:
-            raise AssertionError("Expected 1 team, got %d" % response["totalCount"])
-
-        if len(response.get("teams")) == 0:
-            return None
-        return response.get("teams")[0]
-
-    def update_team(self, team_id, name, email):
-        url = "/api/teams/{team_id}".format(team_id=team_id)
-        team = dict(email=email, name=name)
-        response = self._send_request(url, data=team, headers=self.headers, method="PUT")
-        return response
-
-    def delete_team(self, team_id):
-        url = "/api/teams/{team_id}".format(team_id=team_id)
-        response = self._send_request(url, headers=self.headers, method="DELETE")
-        return response
-
-    def get_team_members(self, team_id):
-        url = "/api/teams/{team_id}/members".format(team_id=team_id)
-        response = self._send_request(url, headers=self.headers, method="GET")
-        members = [item.get("email") for item in response]
-        return members
-
-    def add_team_member(self, team_id, email):
-        url = "/api/teams/{team_id}/members".format(team_id=team_id)
-        data = {"userId": self.get_user_id_from_mail(email)}
-        self._send_request(url, data=data, headers=self.headers, method="POST")
-
-    def delete_team_member(self, team_id, email):
-        user_id = self.get_user_id_from_mail(email)
-        url = "/api/teams/{team_id}/members/{user_id}".format(team_id=team_id, user_id=user_id)
-        self._send_request(url, headers=self.headers, method="DELETE")
-
-    def get_user_id_from_mail(self, email):
-        url = "/api/users/lookup?loginOrEmail={email}".format(email=email)
-        user = self._send_request(url, headers=self.headers, method="GET")
-        if user is None:
-            self._module.fail_json(failed=True, msg="User '%s' does not exists" % email)
-        return user.get("id")
-
-
-def setup_module_object():
-    module = AnsibleModule(
+def setup_module():
+    argument_spec = url_argument_spec()
+    del argument_spec["force"]
+    del argument_spec["force_basic_auth"]
+    del argument_spec["http_agent"]
+    argument_spec.update(
+        state=dict(choices=["present", "absent"], default="present"),
+        name=dict(type="str", required=True),
+        email=dict(type="str", required=True),
+        members=dict(type="list", required=False),
+        url=dict(type="str", required=True),
+        grafana_api_key=dict(type="str", no_log=True),
+        enforce_members=dict(type="bool", default=False),
+        url_username=dict(aliases=["grafana_user"], default="admin"),
+        url_password=dict(aliases=["grafana_password"], default="admin", no_log=True),
+    )
+    return AnsibleModule(
         argument_spec=argument_spec,
         supports_check_mode=False,
-        required_together=[['url_username', 'url_password']],
-        mutually_exclusive=[['url_username', 'grafana_api_key']],
+        required_together=[["url_username", "url_password"]],
+        mutually_exclusive=[["url_username", "grafana_api_key"]],
     )
-    return module
-
-
-argument_spec = url_argument_spec()
-# remove unnecessary arguments
-del argument_spec['force']
-del argument_spec['force_basic_auth']
-del argument_spec['http_agent']
-
-argument_spec.update(
-    state=dict(choices=['present', 'absent'], default='present'),
-    name=dict(type='str', required=True),
-    email=dict(type='str', required=True),
-    members=dict(type='list', required=False),
-    url=dict(type='str', required=True),
-    grafana_api_key=dict(type='str', no_log=True),
-    enforce_members=dict(type='bool', default=False),
-    url_username=dict(aliases=['grafana_user'], default='admin'),
-    url_password=dict(aliases=['grafana_password'], default='admin', no_log=True),
-)
-
-
-def main():
-
-    module = setup_module_object()
-    state = module.params['state']
-    name = module.params['name']
-    email = module.params['email']
-    members = module.params['members']
-    enforce_members = module.params['enforce_members']
-
-    grafana_iface = GrafanaTeamInterface(module)
-
-    changed = False
-    if state == 'present':
-        team = grafana_iface.get_team(name)
-        if team is None:
-            new_team = grafana_iface.create_team(name, email)
-            team = grafana_iface.get_team(name)
-            changed = True
-        if members is not None:
-            cur_members = grafana_iface.get_team_members(team.get("id"))
-            plan = diff_members(members, cur_members)
-            for member in plan.get("to_add"):
-                grafana_iface.add_team_member(team.get("id"), member)
-                changed = True
-            if enforce_members:
-                for member in plan.get("to_del"):
-                    grafana_iface.delete_team_member(team.get("id"), member)
-                    changed = True
-            team = grafana_iface.get_team(name)
-        team['members'] = grafana_iface.get_team_members(team.get("id"))
-        module.exit_json(failed=False, changed=changed, team=team)
-    elif state == 'absent':
-        team = grafana_iface.get_team(name)
-        if team is None:
-            module.exit_json(failed=False, changed=False, message="No team found")
-        result = grafana_iface.delete_team(team.get("id"))
-        module.exit_json(failed=False, changed=True, message=result.get("message"))
 
 
 def diff_members(target, current):
+    # TODO: return a tuple (or two values?)
     diff = {"to_del": [], "to_add": []}
     for member in target:
         if member not in current:
@@ -386,5 +247,55 @@ def diff_members(target, current):
     return diff
 
 
-if __name__ == '__main__':
-    main()
+def reconcile_team():
+    if state == "present" and not team:
+        adapter.create(name, email)
+        return True
+    if state == "present" and team:
+        if {"email": email, "name": name}.items() <= team.items():
+            return False
+        else:
+            adapter.update(team["id"], name, email)
+            return True
+    if state == "absent" and not team:
+        return False
+    if state == "absent" and team:
+        adapter.delete(team["id"])
+        return True
+
+def reconcile_members():
+    if members is not None:
+        cur_members = adapter.get_team_members(team.get("id"))
+        plan = diff_members(members, cur_members)
+        for member in plan.get("to_add"):
+            user = adapter.get_user(member)
+            if not user:
+                module.fail_json(msg="")
+            adapter.add_team_member(team.get("id"), user.get("id"))
+            changed = True
+        if enforce_members:
+            for member in plan.get("to_del"):
+                adapter.delete_team_member(
+                    team.get("id"),
+                    adapter.get_user(member, ignore=()).get("id"),
+                )
+                changed = True
+        team = adapter.get_team_by_name(name)
+    team["members"] = [
+        member.get("email")
+        for member in adapter.get_team_members(team.get("id"))
+    ]
+    module.exit_json(failed=False, changed=changed, team=team)
+
+
+if __name__ == "__main__":
+    module = setup_module()
+    state = module.params["state"]
+    name = module.params["name"]
+    email = module.params["email"]
+    members = module.params["members"]
+    enforce_members = module.params["enforce_members"]
+
+    adapter = GrafanaTeamAdapter(module)
+
+    team = adapter.get(name, ignore=(404,))

@@ -250,7 +250,7 @@ class GrafanaTeamsTest(unittest.TestCase):
         mock_get_version.return_value = get_version_resp()
 
         grafana_iface = grafana_team.GrafanaTeamInterface(module)
-        res = grafana_iface.get_team("MyTestTeam")
+        res = grafana_iface.get_team_by_name("MyTestTeam")
         mock_fetch_url.assert_called_once_with(
             module, 'http://grafana.example.com/api/teams/search?name=MyTestTeam',
             data=None,
@@ -272,7 +272,7 @@ class GrafanaTeamsTest(unittest.TestCase):
         mock_get_version.return_value = get_version_resp()
 
         grafana_iface = grafana_team.GrafanaTeamInterface(module)
-        res = grafana_iface.get_team("MyTestTeam")
+        res = grafana_iface.get_team_by_name("MyTestTeam")
         mock_fetch_url.assert_called_once_with(
             module, 'http://grafana.example.com/api/teams/search?name=MyTestTeam',
             data=None,
